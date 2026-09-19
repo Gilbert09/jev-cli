@@ -25,6 +25,18 @@ export interface PostToolUsePayload extends HookCommon {
   hook_event_name: "PostToolUse";
   tool_name: string;
   tool_input: Record<string, unknown>;
+  /**
+   * The tool's result. The hook reference names this `tool_response`:
+   * "The input includes both `tool_input`, the arguments sent to the tool, and
+   * `tool_response`, the result it returned."
+   *
+   * This was previously typed as `tool_output`, a name Claude Code never sends.
+   * `extractContent` therefore read undefined on every real session and screen
+   * was silently inert in production — no unit test caught it, because the
+   * tests built payloads using the same wrong name.
+   */
+  tool_response?: unknown;
+  /** Accepted only as a fallback; not a field Claude Code emits. */
   tool_output?: unknown;
   tool_use_id?: string;
 }

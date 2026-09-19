@@ -67,7 +67,9 @@ function collectText(value: unknown, depth = 0): string {
  */
 export function extractContent(payload: PostToolUsePayload): Extracted | undefined {
   const input = payload.tool_input ?? {};
-  const output = payload.tool_output;
+  // `tool_response` is what Claude Code actually sends; `tool_output` is kept
+  // only so hand-written payloads in older tests still resolve.
+  const output = payload.tool_response ?? payload.tool_output;
 
   switch (payload.tool_name) {
     case "WebFetch": {

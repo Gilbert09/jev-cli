@@ -105,6 +105,38 @@ beforeEach(() => {
   resetConfigCache();
 });
 
+describe("PostToolUse wire contract", () => {
+  // Regression guard. `screen` read `payload.tool_output` for its entire life.
+  // Claude Code sends `tool_response` — the hook reference is explicit: "the
+  // input includes both `tool_input`, the arguments sent to the tool, and
+  // `tool_response`, the result it returned". So the field was always undefined
+  // in production and screen never once fired in a real session. Every unit
+  // test passed throughout, because they built payloads with the wrong name too.
+  it("reads the tool result from `tool_response`, the field Claude Code sends", () => {
+    const extracted = extractContent({
+      session_id: "s",
+      cwd: "/r",
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "cat notes.md" },
+      tool_response: "the actual content",
+    });
+    expect(extracted?.content).toContain("the actual content");
+  });
+
+  it("still accepts the legacy `tool_output` name so old payloads resolve", () => {
+    const extracted = extractContent({
+      session_id: "s",
+      cwd: "/r",
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "cat notes.md" },
+      tool_output: "legacy content",
+    });
+    expect(extracted?.content).toContain("legacy content");
+  });
+});
+
 describe("decideScreen — the gateway", () => {
   it("stays silent when the content instructs its reader to do nothing at all", () => {
     const answers = attackAnswers({ instructsReader: noulOf(0.2) });

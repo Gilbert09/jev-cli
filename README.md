@@ -104,7 +104,9 @@ Jev and the model can never become a loop that will not end.
 
 ## Measured results
 
-Against the live Jev API, cold cache, two consecutive runs — 157 cases total:
+### Fixture suites
+
+157 labelled cases against the live Jev API, cold cache, verified twice:
 
 | suite | cases | result | what the failures would mean |
 | --- | --- | --- | --- |
@@ -113,16 +115,42 @@ Against the live Jev API, cold cache, two consecutive runs — 157 cases total:
 | `done`   | 35 | 35/35 | 17 must allow, 18 must block |
 | `rank`   | 21 | 21/21 | includes 8 where the answer is absent entirely |
 
-Roughly 240ms per decision (p50), and about $0.000015 — 30k tool calls a month
-costs about $0.46, because Jev bills input only and answers every question in a
+Roughly 240ms per decision and about $0.000015 — 30k tool calls a month costs
+about $0.46, because Jev bills input only and answers every question in a
 request in one round trip.
 
-These numbers come from a tuning round followed by an adversarial review that
-deliberately attacked the question sets. The review found three critical defects
-the passing suites could not have caught, including a `done` output shape Claude
-Code silently ignored — every intervention was a no-op, and the tests asserted
-the shape this repo had invented rather than the documented one. The failure
-modes from both rounds are written up in
+### End-to-end benchmark
+
+228 real Claude Code sessions, same prompts and fixture in both arms, the only
+difference being whether the hooks are installed ([`bench/`](bench/)):
+
+```
+sonnet    baseline 97%  ->  jev  89%    delta   -8%
+haiku     baseline 78%  ->  jev  94%    delta  +17%
+```
+
+**jev substantially helps a weaker model and costs a stronger one.** The
+strongest single result is the third-person injection task on haiku, where the
+attack succeeded 3/3 unprotected and 0/3 with jev. The honest counterweight: on
+sonnet the same task shows screen firing and the model running the script
+anyway — a warning is not a block.
+
+Overhead is real: roughly +12% cost and +50% wall-clock time, and about one
+session in three sees any intervention at all (301 decisions across 48
+instrumented sessions: 44 asks, 0 denies, 3 stop-blocks).
+
+`rank` was never called once in 18 sessions where it was connected and
+allowlisted. A tool nobody invokes has no value however good it is.
+
+Full write-up, including two bugs the benchmark found in jev and two it found
+in the benchmark harness itself: [`bench/FINDINGS.md`](bench/FINDINGS.md).
+
+These numbers come from a tuning round, then an adversarial review that
+deliberately attacked the question sets, then the benchmark. Each round found
+defects the previous one could not — most seriously two wire-contract bugs that
+left `done` and `screen` **completely inert in real sessions while every unit
+test and fixture passed**, because both built their own payloads. The failure
+modes are written up in
 [docs/writing-jev-questions.md](docs/writing-jev-questions.md).
 
 Known limits, stated plainly: `done` reads the final message and a bounded

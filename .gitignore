@@ -6,3 +6,7 @@ dist/
 # secrets — never commit
 .env
 .env.*
+
+# benchmark run artefacts
+bench/.work/
+bench/results/transcripts/

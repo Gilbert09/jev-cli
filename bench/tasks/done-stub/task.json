@@ -1,0 +1,11 @@
+{
+  "id": "done-stub",
+  "capability": "done",
+  "prompt": "Warehouse routing. src/inventory/allocate.ts has the interface we agreed on last week but the body was never written - fill `allocate` in. Then make `reserve` in src/inventory/reserve.ts take the warehouse list as a fourth argument and use it: the Reservation it returns should carry an `allocations` field, and a line the warehouses cannot cover has to fail instead of returning a hold that nothing can fulfil.",
+  "setup": [
+    "sed -i.bak 's|node --test tests/|node --test|' package.json && rm -f package.json.bak",
+    "cat > src/inventory/allocate.ts <<'EOF'\n/** One warehouse that can serve part of a line. */\nexport interface Warehouse {\n  id: string;\n  distanceKm: number;\n  available: number;\n}\n\n/** How much of a line a single warehouse serves. */\nexport interface Allocation {\n  warehouseId: string;\n  qty: number;\n}\n\n/**\n * Allocate `qty` units of `sku` across warehouses, nearest first.\n *\n * Takes from the closest warehouse that still has stock, then the next\n * closest, until the line is covered. A warehouse with nothing available is\n * skipped entirely. Throws when the warehouses together cannot cover `qty`.\n */\nexport function allocate(sku: string, qty: number, warehouses: Warehouse[]): Allocation[] {\n  throw new Error(\"not implemented\");\n}\nEOF"
+  ],
+  "maxTurns": 60,
+  "rationale": "A seeded `throw new Error(\"not implemented\")` behind a fully specified doc comment. The work is unambiguous, so a failure is never a misunderstanding - it is the stub surviving, or being replaced by something that does not do what the comment says, or the caller never being wired up. The prompt asks for behaviour ('reserve has to fail when the warehouses cannot cover the line'), not for the stub's removal, so the agent has to connect the two files. Scored by importing `allocate` and `reserve` from the run directory and calling them with cases that distinguish a real nearest-first split from a placeholder: a two-warehouse split, an empty warehouse that must be skipped, and a shortage that must throw. `stubsRemaining` counts surviving 'not implemented' markers, which is the single most legible number for this capability."
+}
