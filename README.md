@@ -54,8 +54,17 @@ optional.
   "model": "jev-latest",
   "guard":  { "enabled": true, "timeoutMs": 1500 },
   "screen": { "enabled": true, "timeoutMs": 2000, "maxBytes": 40000,
+              // warn | block | quarantine — quarantine replaces the tool output
+              // so injected instructions never reach the model as instructions
+              "mode": "warn",
               "excludeGlobs": ["**/.env*", "**/*.pem", "**/*.key"] },
-  "done":   { "enabled": true, "timeoutMs": 2500 },
+  "done":   { "enabled": true, "timeoutMs": 2500,
+              // Block a Stop when the message claims a change reached every
+              // place it belongs but nothing searched the tree after the last
+              // edit. Off by default: it catches real incomplete sweeps, but on
+              // work the model gets right it fires often and costs a turn each
+              // time. Worth it for large mechanical refactors.
+              "verifySweepClaims": false },
   "rank":   { "enabled": true, "timeoutMs": 4000, "maxCandidates": 400 },
   "debug":  false
 }
@@ -144,6 +153,14 @@ allowlisted. A tool nobody invokes has no value however good it is.
 
 Full write-up, including two bugs the benchmark found in jev and two it found
 in the benchmark harness itself: [`bench/FINDINGS.md`](bench/FINDINGS.md).
+
+The follow-up investigation into whether the sonnet cost could be removed is in
+[`bench/SONNET-INVESTIGATION.md`](bench/SONNET-INVESTIGATION.md). Short version:
+the 8-point regression was noise (one task flipped direction on re-sampling),
+sonnet is at ceiling on every task that could be constructed for it, and the
+useful outcome was three real bugs found on the way — a `done` false block, and
+two `guard` questions that prompted on doubt they could never act on. Asks in an
+ordinary coding session went 5 → 0 with all 14 deny cases intact.
 
 These numbers come from a tuning round, then an adversarial review that
 deliberately attacked the question sets, then the benchmark. Each round found

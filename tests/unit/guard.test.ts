@@ -156,9 +156,46 @@ describe("confidence gating", () => {
     },
   );
 
-  it.each([...FILE_KEYS])("never allows when a file write answer `%s` is a coin flip", (key) => {
+  // `removesTests` is the one exemption, and only on a non-test path: a file
+  // that holds no tests cannot have tests removed from it, so an uncertain
+  // answer there is an unanswerable question rather than an unresolved risk.
+  // Two exemptions, both provable rather than tuned:
+  //   removesTests   — a non-test file holds no tests to remove
+  //   destroysContent — only ever acts conjoined with escapesProject or
+  //                     emptiesFile, so when both are confidently false its
+  //                     value cannot change the verdict
+  const FILE_ALWAYS_GATED = FILE_KEYS.filter(
+    (k) => k !== "removesTests" && k !== "destroysContent",
+  );
+
+  it.each([...FILE_ALWAYS_GATED])("never allows when a file write answer `%s` is a coin flip", (key) => {
     const unsure: Answer = key === "blastRadius" ? scoreOf(0.5, CALM, 0.1) : noulOf(0.5);
     expect(decideFile({ [key]: unsure }).permissionDecision).not.toBe("allow");
+  });
+
+  it("does not prompt over an uncertain `removesTests` on a file that holds no tests", () => {
+    // Measured cause of real permission fatigue: 5 of 16 guard decisions in one
+    // ordinary sonnet session were asks, every one of them this exact signal on
+    // a non-test file. It bought no safety and trained reflexive approval.
+    expect(decideFile({ removesTests: noulOf(0.5) }).permissionDecision).toBe("allow");
+  });
+
+  it("does not prompt over an uncertain `destroysContent` when both its partners are quiet", () => {
+    expect(decideFile({ destroysContent: noulOf(0.6) }).permissionDecision).toBe("allow");
+  });
+
+  it("still prompts over an uncertain `destroysContent` when the write may empty the file", () => {
+    // The partner is live, so the conjunction can fire and the doubt matters.
+    const risky = decideFile({ destroysContent: noulOf(0.6), emptiesFile: noulOf(0.95) });
+    expect(risky.permissionDecision).not.toBe("allow");
+  });
+
+  it("still prompts over an uncertain `removesTests` when the target IS a test file", () => {
+    const onTestFile = decideGuard(fileAnswers({ removesTests: noulOf(0.5) }), {
+      tool: "Write",
+      subject: "/repo/tests/money.test.js",
+    });
+    expect(onTestFile.permissionDecision).not.toBe("allow");
   });
 
   it("does not deny on a high score the model is not confident about", () => {

@@ -307,6 +307,18 @@ function decideBash(answers: Record<string, Answer>, ctx: GuardContext): GuardDe
   return decision("allow", ctx, explain([scoreFinding("danger", "reads or changes little", danger)]));
 }
 
+/**
+ * Does this path hold tests? Deliberately broad — a false positive here only
+ * restores the previous (more cautious) behaviour, so erring wide is free.
+ */
+export function isTestPath(path: string): boolean {
+  const p = path.replace(/\\/g, "/").toLowerCase();
+  return (
+    /(^|\/)[^/]*\.(test|spec)\.[cm]?[jt]sx?$/.test(p) ||
+    /(^|\/)(tests?|__tests__|spec|e2e|fixtures?)\//.test(p)
+  );
+}
+
 function decideFile(answers: Record<string, Answer>, ctx: GuardContext): GuardDecision {
   const t = THRESHOLDS.file;
   const blastRadius = asScore(answers.blastRadius);
@@ -384,7 +396,32 @@ function decideFile(answers: Record<string, Answer>, ctx: GuardContext): GuardDe
     // is a human decision even when the write itself is small.
     ask.push(noulFinding("removesTests", "deletes or weakens tests", removesTests));
   }
-  ask.push(...uncertainFindings(answers, FILE_KEYS));
+  // Doubt about `removesTests` is settled deterministically when the target is
+  // not a test file: you cannot remove tests from a file that holds none, so an
+  // uncertain answer there is an unanswerable question, not an unresolved risk.
+  //
+  // Measured: in one ordinary sonnet coding session, 5 of 16 guard decisions
+  // were asks and every one of them was "jev is unsure whether this removes
+  // existing tests" on a non-test file. That is pure permission fatigue — it
+  // buys no safety and trains the user to approve reflexively.
+  const settledFile = isTestPath(ctx.subject) ? [] : ["removesTests"];
+
+  // `destroysContent` never acts alone: it only contributes conjoined with
+  // `escapesProject` (deny) or `emptiesFile` (ask). When BOTH partners are
+  // confidently false the conjunctions cannot fire whatever `destroysContent`
+  // turns out to be, so doubt about it cannot change the verdict — and an
+  // answer that cannot change the verdict must not manufacture a prompt.
+  //
+  // It is true of nearly every `Write` to an existing file, so it is uncertain
+  // often: it accounted for the remaining 3 asks in an ordinary coding session
+  // after the `removesTests` fix, all on routine edits.
+  const partnersQuiet =
+    escapesProject.confidence >= THRESHOLDS.minConfidence &&
+    escapesProject.noul < t.escapesProject &&
+    emptiesFile.confidence >= THRESHOLDS.minConfidence &&
+    emptiesFile.noul < t.emptiesFile;
+  if (partnersQuiet) settledFile.push("destroysContent");
+  ask.push(...uncertainFindings(answers, FILE_KEYS, settledFile));
   if (ask.length > 0) return decision("ask", ctx, explain(ask));
 
   return decision(

@@ -585,6 +585,21 @@ function scriptRunnerKinds(exe: string, args: string[]): Verification[] {
 }
 
 /** Which checks did this one invocation actually perform? */
+/** Runtimes that execute a file argument as code, rather than inspecting it. */
+const TEST_FILE_RUNTIMES = new Set(["tsx", "ts-node", "bun", "deno", "esbuild-register", "swc-node"]);
+
+/**
+ * A path that is unambiguously a test file. Deliberately narrow: it must look
+ * like a spec file or sit under a test directory, so `node build.js` is not
+ * mistaken for a test run.
+ */
+function isTestFile(arg: string): boolean {
+  if (arg.startsWith("-")) return false;
+  const path = arg.replace(/\\/g, "/");
+  if (/(^|\/)[^/]*\.(test|spec)\.[cm]?[jt]sx?$/.test(path)) return true;
+  return /(^|\/)(tests?|__tests__|spec)\//.test(path) && /\.[cm]?[jt]sx?$/.test(path);
+}
+
 export function invocationKinds(inv: Invocation): Verification[] {
   const { exe, args } = inv;
   if (READ_ONLY.has(exe)) return [];
@@ -624,7 +639,18 @@ export function invocationKinds(inv: Invocation): Verification[] {
   if (exe === "prettier") {
     return args.includes("--check") || args.includes("-c") ? ["lint"] : [];
   }
-  if (exe === "node") return args.includes("--test") ? ["test"] : [];
+  // `node --test` is the obvious form, but an agent may equally run a spec file
+  // directly: `node tests/money.test.js`, `node --experimental-strip-types
+  // tests/x.test.ts`, `npx tsx tests/x.test.ts`. Those genuinely execute the
+  // tests, and failing to count them made `done` tell an agent it had never run
+  // the suite moments after it did — a false block that costs real turns.
+  if (exe === "node") {
+    if (args.includes("--test")) return ["test"];
+    return positional(args).some(isTestFile) ? ["test"] : [];
+  }
+  if (TEST_FILE_RUNTIMES.has(exe)) {
+    return positional(args).some(isTestFile) ? ["test"] : [];
+  }
   if (exe === "python" || exe === "python3" || exe === "py") {
     const module = args[args.indexOf("-m") + 1];
     if (args.includes("-m") && module !== undefined) {
@@ -720,3 +746,48 @@ export function ranNothingExecutable(commands: readonly CommandRun[]): boolean {
   }
   return true;
 }
+
+/**
+ * Did a codebase-wide search run AFTER the last file edit?
+ *
+ * This is the evidence behind an exhaustive-change claim. An agent that says
+ * "every call site now passes the area" has made a universal claim about code
+ * it cannot see all of; the only thing that turns that into knowledge is a
+ * search run after the final edit.
+ *
+ * Measured on a 19-call-site rename where sonnet failed 38% of the time: every
+ * failing run verified its own changes (tests, typecheck, `git diff`) and never
+ * once searched for what it might have missed. The one run that reliably found
+ * all 19 searched for both the direct name and its local alias.
+ *
+ * Deliberately strict about what counts. `cat package.json | grep scripts` is a
+ * lookup in a file the agent already had; it is not a sweep of the tree.
+ */
+export function sweptAfterLastEdit(commands: readonly CommandRun[]): boolean {
+  const lastEdit = commands.map((c, i) => (isEditTool(c.tool) ? i : -1)).filter((i) => i >= 0).pop();
+  if (lastEdit === undefined) return true; // Nothing was edited, so nothing to sweep for.
+  return commands.slice(lastEdit + 1).some(isCodebaseSearch);
+}
+
+function isEditTool(tool: string): boolean {
+  return tool === "Edit" || tool === "Write" || tool === "NotebookEdit" || tool === "MultiEdit";
+}
+
+/** A search across the tree, as opposed to a lookup inside one known file. */
+function isCodebaseSearch(run: CommandRun): boolean {
+  if (run.tool === "Grep" || run.tool === "Glob") return true;
+  if (run.tool !== "Bash") return false;
+
+  for (const inv of parseCommand(run.command)) {
+    if (!SEARCH_TOOLS.has(inv.exe)) continue;
+    const args = positional(inv.args);
+    // `grep pattern file.json` targets one file; a sweep either names a
+    // directory, recurses, or globs. Either shape is enough.
+    const recursive = inv.args.some((a) => /^-[a-zA-Z]*r/.test(a) || a === "--recursive");
+    const wideTarget = args.slice(1).some((a) => a === "." || a.endsWith("/") || a.includes("*") || !a.includes("."));
+    if (recursive || wideTarget || inv.exe === "rg" || inv.exe === "ag") return true;
+  }
+  return false;
+}
+
+const SEARCH_TOOLS = new Set(["grep", "rg", "ag", "ack", "ugrep", "find", "fd"]);

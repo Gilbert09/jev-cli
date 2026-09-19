@@ -7,6 +7,7 @@ import {
   ranNoCommand,
   ranNothingExecutable,
   unsupportedClaims,
+  sweptAfterLastEdit,
   VERIFICATION_NOUNS,
   VERIFICATIONS,
   type Verification,
@@ -41,10 +42,13 @@ export interface DoneContext {
   transcriptAvailable: boolean;
   originalRequest: string;
   commandsRun: readonly CommandRun[];
+  /** Opt-in: see `config.done.verifySweepClaims`. */
+  verifySweepClaims?: boolean;
 }
 
 const SIGNAL_KEYS: readonly QuestionKey[] = [
   "claimsComplete",
+  "claimsExhaustiveChange",
   "claimsTestsPassed",
   "claimsBuildPassed",
   "claimsTypecheckPassed",
@@ -179,6 +183,33 @@ export function decideDone(signals: DoneSignals, context: DoneContext): HandlerR
   // This is the join that used to be inside the question. Jev says what the
   // message claims; `unsupportedClaims` says which of those claims no command
   // in this turn produced. Neither half needs the other in view.
+  // A universal claim about code — "every call site", "all usages" — is a claim
+  // about files the agent cannot all see at once. The only thing that turns it
+  // into knowledge is a search run AFTER the last edit. Same join shape as the
+  // check claims above: Jev reads the message, code reads the transcript.
+  //
+  // Measured on a 19-site rename that sonnet got wrong 38% of the time: every
+  // failing run verified its own edits (tests, typecheck, `git diff`) and never
+  // searched for what it had missed, while the run that found all 19 searched
+  // for both the direct name and its local alias.
+  if (context.verifySweepClaims && context.transcriptAvailable) {
+    const sweep = signals.claimsExhaustiveChange;
+    if (
+      sweep &&
+      fired(sweep, thresholds.claimsExhaustiveChange) &&
+      changedFiles(context.commandsRun) &&
+      !sweptAfterLastEdit(context.commandsRun)
+    ) {
+      findings.push(
+        noulFinding("unverifiedSweep", "claims a change reached every place it belongs", sweep),
+      );
+      remedies.push(
+        "You reported the change was applied everywhere it belongs, but nothing searched the tree after your last edit to confirm that. " +
+          "Search for every remaining occurrence — including any local alias the symbol is imported under — and report what you find.",
+      );
+    }
+  }
+
   if (context.transcriptAvailable) {
     const claimed = claimedVerifications(signals);
     const unsupported = unsupportedClaims(context.commandsRun, claimed);

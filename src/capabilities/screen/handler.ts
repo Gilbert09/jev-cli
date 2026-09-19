@@ -180,6 +180,6 @@ export async function screen(payload: PostToolUsePayload): Promise<HandlerResult
   // broken turn — screening is an enhancement, never a dependency.
   if (!result.ok) return none;
 
-  const context: ScreenContext = { source: extracted.source, origin, truncated };
-  return decideScreen(result.answers, context);
+  const context: ScreenContext = { source: extracted.source, origin, truncated, content: text };
+  return decideScreen(result.answers, context, loadConfig().screen.mode);
 }

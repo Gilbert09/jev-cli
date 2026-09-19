@@ -36,10 +36,15 @@ export function serialize(result: HandlerResult): string | undefined {
 
     case "postToolUse":
       return JSON.stringify({
+        // `decision`/`reason` are TOP-LEVEL for PostToolUse, the same shape as
+        // Stop: "the only value for `decision` is `block`". `updatedToolOutput`
+        // and `additionalContext` live inside hookSpecificOutput.
+        ...(result.decision ? { decision: result.decision, reason: result.reason ?? "" } : {}),
         hookSpecificOutput: {
           hookEventName: "PostToolUse",
           ...(result.additionalContext ? { additionalContext: result.additionalContext } : {}),
           ...(result.systemMessage ? { systemMessage: result.systemMessage } : {}),
+          ...(result.updatedToolOutput !== undefined ? { updatedToolOutput: result.updatedToolOutput } : {}),
         },
       });
 

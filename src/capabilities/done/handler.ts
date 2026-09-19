@@ -1,3 +1,4 @@
+import { loadConfig } from "../../core/config.js";
 import { ask } from "../../core/jev.js";
 import { prepare } from "../../core/redact.js";
 import { readState, writeState } from "../../core/session-state.js";
@@ -77,6 +78,7 @@ export async function done(payload: StopPayload): Promise<HandlerResult> {
       transcriptAvailable: transcript.available,
       originalRequest: transcript.originalRequest,
       commandsRun: transcript.commandsRun,
+      verifySweepClaims: loadConfig().done.verifySweepClaims,
     });
 
     if (decision.kind === "blockStop") recordIntervention(sessionId, key);

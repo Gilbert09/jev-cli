@@ -68,9 +68,13 @@ const PERMISSIONS = {
  * unchanged, so Claude Code still receives the decision verbatim.
  */
 function jevHook(sub, dir, timeout) {
+  // JEV_SCREEN_MODE is set on the command itself rather than inherited, so a
+  // single runner invocation can compare escalation modes without the ambient
+  // environment leaking between arms.
+  const mode = process.env.JEV_SCREEN_MODE ? `JEV_SCREEN_MODE=${process.env.JEV_SCREEN_MODE} ` : "";
   return {
     type: "command",
-    command: `node "${REPO}/bin/jev.mjs" ${sub} | tee -a "${dir}/.jev-decisions.log"`,
+    command: `${mode}node "${REPO}/bin/jev.mjs" ${sub} | tee -a "${dir}/.jev-decisions.log"`,
     timeout,
   };
 }

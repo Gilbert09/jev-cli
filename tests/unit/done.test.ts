@@ -24,6 +24,7 @@ import {
   ranNoCommand,
   ranNothingExecutable,
   unsupportedClaims,
+  sweptAfterLastEdit,
   verificationRan,
   VERIFICATIONS,
   type Verification,
@@ -81,6 +82,112 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(workspace, { recursive: true, force: true });
+});
+
+describe("the sweep gate is opt-in", () => {
+  // Measured: on a task sonnet handles correctly the gate fired in 6 of 8 runs
+  // and added 35% wall-clock to catch nothing. The mechanism is sound (it
+  // caught 2 of 2 real incomplete sweeps on replay) but default-on it costs
+  // more than it returns, so it ships off and is documented for the case it
+  // was built for: large mechanical refactors.
+  const sweepContext = (verify: boolean) => ({
+    alreadyIntervened: false,
+    transcriptAvailable: true,
+    originalRequest: "rename audit to take an area argument at every call site",
+    commandsRun: [
+      { tool: "Edit", command: "src/a.ts", status: "ok" },
+      { tool: "Bash", command: "npx tsc --noEmit", status: "ok" },
+    ],
+    verifySweepClaims: verify,
+  }) as never;
+
+  const claimed = { ...quiet, claimsExhaustiveChange: YES } as never;
+
+  it("stays silent when not enabled, even on an unverified sweep claim", () => {
+    expect(decideDone(claimed, sweepContext(false))).toEqual({ kind: "none" });
+  });
+
+  it("blocks the same turn once enabled", () => {
+    expect(decideDone(claimed, sweepContext(true))).toMatchObject({ kind: "blockStop" });
+  });
+});
+
+describe("unverified sweep claims", () => {
+  // A universal claim about code — "every call site", "all usages" — asserts
+  // something about files the agent cannot all see at once. Only a search run
+  // AFTER the last edit turns it into knowledge.
+  //
+  // Measured on a 19-site rename sonnet got wrong 38% of the time: every
+  // failing run verified its own edits (tests, typecheck, `git diff`) and never
+  // searched for what it had missed; the run that found all 19 searched for
+  // both the direct symbol and its local alias.
+  const bash = (command: string) => ({ tool: "Bash", command, status: "ok" }) as never;
+  const edit = (file: string) => ({ tool: "Edit", command: file, status: "ok" }) as never;
+
+  it("counts a recursive tree search after the last edit", () => {
+    expect(sweptAfterLastEdit([edit("a.ts"), bash("grep -rn 'audit(' src")])).toBe(true);
+  });
+
+  it("counts the Grep and Glob tools", () => {
+    expect(sweptAfterLastEdit([edit("a.ts"), { tool: "Grep", command: "audit(", status: "ok" } as never])).toBe(true);
+    expect(sweptAfterLastEdit([edit("a.ts"), { tool: "Glob", command: "**/*.ts", status: "ok" } as never])).toBe(true);
+  });
+
+  it("does not count verifying your own edits", () => {
+    // Exactly what the failing runs did: prove the change works, never look for
+    // what was missed.
+    const after = [edit("a.ts"), bash("npx tsc --noEmit"), bash("node --test"), bash("git diff --stat")];
+    expect(sweptAfterLastEdit(after)).toBe(false);
+  });
+
+  it("does not count a lookup inside one already-known file", () => {
+    // `cat package.json | grep scripts` reads a file the agent already had; it
+    // is not a sweep of the tree, and treating it as one would silence the gate.
+    expect(sweptAfterLastEdit([edit("a.ts"), bash("cat package.json | grep -A5 scripts")])).toBe(false);
+  });
+
+  it("does not count a search that happened BEFORE the last edit", () => {
+    // The ordering is the whole point: a sweep only supports the claim if it
+    // came after the final change.
+    expect(sweptAfterLastEdit([bash("grep -rn 'audit(' src"), edit("a.ts")])).toBe(false);
+  });
+
+  it("is vacuously satisfied when nothing was edited", () => {
+    expect(sweptAfterLastEdit([bash("ls")])).toBe(true);
+  });
+});
+
+describe("direct test-file invocations count as a test run", () => {
+  // Found by replaying a real sonnet session: the agent ran
+  // `node --experimental-strip-types tests/money.test.js`, which genuinely
+  // executes the suite, and the matcher did not recognise it. `done` then told
+  // the agent it had never run the tests moments after it had — a false block
+  // that costs turns, which is the expensive direction for this capability.
+  const ran = (command: string) =>
+    verificationRan([{ tool: "Bash", command, failed: false } as never], "test");
+
+  it.each([
+    "node --test",
+    "node --test tests/money.test.js",
+    "node --experimental-strip-types tests/money.test.js",
+    "node tests/money.test.js",
+    "npx tsx tests/money.test.js",
+    "bun test/foo.spec.ts",
+  ])("counts %s", (command) => {
+    expect(ran(command)).toBe(true);
+  });
+
+  it.each([
+    // Inspecting a spec file is not running it.
+    "cat tests/money.test.js",
+    "grep -rn multiply tests/money.test.js",
+    // Running ordinary code is not running the suite — this is the boundary
+    // that keeps the fix from turning into a false negative on the other side.
+    "node dist/cli.js doctor",
+    "node scripts/build.js",
+  ])("does not count %s", (command) => {
+    expect(ran(command)).toBe(false);
+  });
 });
 
 describe("invariant 1: fail open", () => {

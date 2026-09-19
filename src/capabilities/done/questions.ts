@@ -56,6 +56,7 @@ export interface NoulThreshold {
 
 export type QuestionKey =
   | "claimsComplete"
+  | "claimsExhaustiveChange"
   | "claimsTestsPassed"
   | "claimsBuildPassed"
   | "claimsTypecheckPassed"
@@ -92,6 +93,10 @@ export const thresholds: Record<QuestionKey, NoulThreshold> = {
   vouchesForBehaviour: { probability: 0.8, minConfidence: 0.6 },
 
   leavesStubs: { probability: 0.8, minConfidence: 0.6 },
+  // A universal claim is only a gap when nothing verified it, and the code-side
+  // check (`sweptAfterLastEdit`) does the verifying. So this bar only has to be
+  // confident the claim WAS made, not that it was wrong.
+  claimsExhaustiveChange: { probability: 0.8, minConfidence: 0.6 },
   namesUndoneWork: { probability: 0.8, minConfidence: 0.6 },
   // Measured, not guessed. Across the allow cases this signal peaks at 0.13;
   // across the continue cases it bottoms at 0.79. A bar of 0.8 sat at the very
@@ -162,6 +167,15 @@ export const questions = {
   ),
 
   // ---- Gaps that live entirely inside `message`.
+  claimsExhaustiveChange: noul(
+    "Does `message` claim that a change was applied to every place it belongs — every call site, all usages, or throughout the codebase?",
+    {
+      true: "The message states or clearly implies the change reached all of them: 'every call site', 'all usages', 'throughout', 'each of the N places', or a count presented as the complete set.",
+      false:
+        "The message describes changing specific named places without claiming to have covered them all, or reports the work as partial, or makes no claim about coverage at all.",
+    },
+  ),
+
   leavesStubs: noul(
     "Does `message` say that placeholders, TODOs, stubs, mocks, or unimplemented pieces remain in the code it changed?",
     {

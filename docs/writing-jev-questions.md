@@ -170,3 +170,45 @@ A budget optimisation is a bypass with a documented size. At $0.000015 a call
 there was nothing to save. The floor is now 24 bytes — chosen empirically as the
 point below which the model itself stops holding a stable verdict (a 21-byte
 fragment flapped 4/6 across the bar), not as a guess.
+
+## 11. A signal that cannot change the verdict must not manufacture a prompt
+
+`guard` asked the user for approval 5 times in 16 decisions during an ordinary
+coding session. Every one was uncertainty, not risk — the model answering near
+0.5 on a question it could not answer about that input.
+
+Two causes, both fixed by reasoning about the *decision structure* rather than
+by moving a threshold:
+
+- `removesTests` was uncertain on ordinary source files. But a file that holds
+  no tests cannot have tests removed from it, so the doubt was unanswerable
+  rather than unresolved.
+- `destroysContent` only ever contributes conjoined with `escapesProject` or
+  `emptiesFile`. When both partners are confidently false, the conjunction
+  cannot fire whatever `destroysContent` turns out to be — so doubt about it is
+  provably irrelevant.
+
+```
+asks in an ordinary coding session:  5 -> 3 -> 0   (all 14 deny cases intact)
+```
+
+**Before letting an uncertain answer escalate, ask whether a confident answer
+could have changed the outcome.** If not, the doubt is noise, and escalating it
+is pure permission fatigue — which does not merely annoy, it trains the user to
+approve without reading.
+
+## 12. Mechanism-proven is not outcome-proven, and the difference is a default
+
+`verifySweepClaims` catches a real failure: a message claiming a change reached
+"every call site" when nothing searched the tree after the last edit. Replayed
+against real transcripts it caught 2 of 2 genuinely incomplete sweeps, and
+correctly stayed quiet on the run that had searched for both the symbol and its
+local alias.
+
+It still ships **off by default**, because on a live task the model handles
+correctly it fired in 6 of 8 runs and added 35% wall-clock to catch nothing.
+
+Those are two different claims and they deserve different treatment. *The
+mechanism works* justifies shipping the code. *The default earns its cost*
+requires an outcome measurement, and that one failed. Shipping it on would have
+made the tool worse for everyone who does not have the problem it solves.

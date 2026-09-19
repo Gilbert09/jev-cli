@@ -65,7 +65,16 @@ export type HandlerResult =
       permissionDecisionReason: string;
       additionalContext?: string;
     }
-  | { kind: "postToolUse"; additionalContext?: string; systemMessage?: string }
+  | {
+      kind: "postToolUse";
+      additionalContext?: string;
+      systemMessage?: string;
+      /** Places `reason` next to the tool result — a stronger signal than context alone. */
+      decision?: "block";
+      reason?: string;
+      /** Replaces what Claude sees. The tool has already run; this only changes the input to the model. */
+      updatedToolOutput?: unknown;
+    }
   /**
    * Block a Stop. Per the hook reference, `"block"` is the ONLY value `decision`
    * accepts, it is TOP-LEVEL (not inside `hookSpecificOutput`), and `reason` is

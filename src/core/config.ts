@@ -23,12 +23,37 @@ export interface Config {
   model: string;
   guard: CapabilityConfig;
   screen: CapabilityConfig & {
+    /**
+     * What to do when content is judged an injection.
+     *   warn       - append a note to context (advisory)
+     *   block      - also place the reason beside the tool result
+     *   quarantine - additionally replace the tool output, so the injected
+     *                instructions never reach the model as instructions
+     */
+    mode: "warn" | "block" | "quarantine";
     /** Paths matching any of these are never sent off the machine. */
     excludeGlobs: string[];
     /** Truncate content beyond this before evaluating. */
     maxBytes: number;
   };
-  done: CapabilityConfig;
+  done: CapabilityConfig & {
+    /**
+     * Block a Stop when the message claims a change reached every place it
+     * belongs but nothing searched the tree after the last edit.
+     *
+     * OFF by default, and the measurements are why. The mechanism is sound —
+     * replayed against real transcripts of a 19-call-site rename it caught 2 of
+     * 2 genuinely incomplete sweeps, and correctly stayed quiet on the run that
+     * had searched for both the symbol and its local alias. But on a live task
+     * sonnet handles correctly it fired in 6 of 8 runs and added 35% wall-clock
+     * for nothing, because there was nothing to catch.
+     *
+     * Turn it on for large mechanical refactors — renames, signature changes,
+     * codemods across many files — where a silently missed call site is
+     * expensive and one extra verification turn is not.
+     */
+    verifySweepClaims: boolean;
+  };
   rank: CapabilityConfig & { maxCandidates: number };
   /** Write decision traces to stderr. Claude Code shows these with --debug. */
   debug: boolean;
@@ -42,11 +67,12 @@ const DEFAULTS: Omit<Config, "apiKey"> = {
   guard: { enabled: true, timeoutMs: 1500 },
   screen: {
     enabled: true,
+    mode: "warn",
     timeoutMs: 2000,
     excludeGlobs: ["**/.env*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/.git/**"],
     maxBytes: 40_000,
   },
-  done: { enabled: true, timeoutMs: 2500 },
+  done: { enabled: true, timeoutMs: 2500, verifySweepClaims: false },
   rank: { enabled: true, timeoutMs: 4000, maxCandidates: 400 },
   debug: false,
 };
@@ -75,8 +101,17 @@ export function loadConfig(): Config {
     apiKey: process.env.TYPESAFE_API_KEY ?? (file as { apiKey?: string }).apiKey,
     model: process.env.JEV_MODEL ?? file.model ?? DEFAULTS.model,
     guard: mergeCapability(DEFAULTS.guard, file.guard),
-    screen: mergeCapability(DEFAULTS.screen, file.screen),
-    done: mergeCapability(DEFAULTS.done, file.done),
+    screen: {
+      ...mergeCapability(DEFAULTS.screen, file.screen),
+      mode: (process.env.JEV_SCREEN_MODE as Config["screen"]["mode"]) ?? file.screen?.mode ?? DEFAULTS.screen.mode,
+    },
+    done: {
+      ...mergeCapability(DEFAULTS.done, file.done),
+      verifySweepClaims:
+        process.env.JEV_VERIFY_SWEEPS === "1" ||
+        file.done?.verifySweepClaims === true ||
+        DEFAULTS.done.verifySweepClaims,
+    },
     rank: mergeCapability(DEFAULTS.rank, file.rank),
     debug: process.env.JEV_DEBUG === "1" || file.debug === true,
   };
