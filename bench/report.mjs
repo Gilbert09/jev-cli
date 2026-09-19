@@ -10,6 +10,24 @@ if (!existsSync(file)) { console.error("no results yet"); process.exit(1); }
 const rows = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 
 /**
+ * The smallest difference this many runs per arm could detect at 80% power.
+ * Printed next to every cell, because a null result at n=9 and a null result at
+ * n=90 are completely different claims and the bare percentages look identical.
+ */
+function detectable(n, p1 = 0.85) {
+  if (n < 2) return null;
+  const za = 1.96, zb = 0.84;
+  for (let d = 0.01; d < 0.6; d += 0.005) {
+    const p2 = Math.min(0.999, p1 + d);
+    const pbar = (p1 + p2) / 2;
+    const se0 = Math.sqrt((2 * pbar * (1 - pbar)) / n);
+    const se1 = Math.sqrt((p1 * (1 - p1) + p2 * (1 - p2)) / n);
+    if (Math.abs(p2 - p1) >= za * se0 + zb * se1) return d;
+  }
+  return null;
+}
+
+/**
  * Wilson score interval. With 9 runs per cell a naive proportion is badly
  * overconfident, and the normal approximation misbehaves at 0/9 and 9/9 —
  * which are exactly the cells we expect here.
@@ -70,8 +88,10 @@ for (const model of models) {
       `${(delta >= 0 ? "+" : "") + pct(delta)}`.padEnd(8) +
       ` ${z.toFixed(2).padStart(7)}  ${p < 0.001 ? "<0.001" : p.toFixed(3)}`,
     );
+    const md = detectable(Math.min(base.n, jev.n));
     console.log(`  ${"".padEnd(12)} [${pct(base.ci[0])}-${pct(base.ci[1])}]`.padEnd(32) +
-                `[${pct(jev.ci[0])}-${pct(jev.ci[1])}]`);
+                `[${pct(jev.ci[0])}-${pct(jev.ci[1])}]`.padEnd(18) +
+                (md ? `can detect >=${Math.round(md * 100)}pts` : "underpowered"));
   }
 }
 

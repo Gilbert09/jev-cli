@@ -10,3 +10,7 @@ dist/
 # benchmark run artefacts
 bench/.work/
 bench/results/transcripts/
+
+# in-flight benchmark output (committed once the run completes)
+bench/results/scaled.jsonl
+bench/results/*.log
