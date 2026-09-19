@@ -1,0 +1,28 @@
+{
+  "name": "jev-cli",
+  "version": "0.1.0",
+  "description": "A Jev-powered judgement layer for Claude Code: semantic permission gating, prompt-injection screening, completion verification, and semantic ranking.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "jev": "./bin/jev.mjs" },
+  "files": ["bin", "dist", "hooks", ".claude-plugin", ".mcp.json", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit",
+    "fixtures": "node --enable-source-maps dist/fixtures.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "license": "MIT"
+}

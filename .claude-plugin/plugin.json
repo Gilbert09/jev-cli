@@ -1,0 +1,19 @@
+{
+  "name": "jev",
+  "displayName": "Jev judgement layer",
+  "version": "0.1.0",
+  "description": "Semantic permission gating, prompt-injection screening, completion verification, and semantic ranking — powered by TypeSafe's Jev model.",
+  "license": "MIT",
+  "keywords": ["security", "guardrails", "permissions", "prompt-injection", "jev", "typesafe"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "typesafe_api_key": {
+      "type": "string",
+      "title": "TypeSafe API key",
+      "description": "API key for the Jev model. Get one at console.typesafe.ai. You can also set TYPESAFE_API_KEY in your environment instead.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}
