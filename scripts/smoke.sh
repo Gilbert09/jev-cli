@@ -50,7 +50,10 @@ cat > /tmp/jev-smoke-transcript.jsonl <<'JSONL'
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/text.ts"}}]}}
 JSONL
 if [[ -n "${TYPESAFE_API_KEY:-}" ]]; then
-  out=$(printf '{"session_id":"smoke-%s","cwd":"/r","hook_event_name":"Stop","prompt_id":"p%s","last_assistant_message":"Added slugify. All tests pass, the suite is green.","transcript_path":"/tmp/jev-smoke-transcript.jsonl"}' "$RANDOM" "$RANDOM" | $JEV done)
+  # `done` ships disabled (bench/RESULTS.md: +3pts, p=0.593), but the WIRE
+  # CONTRACT must hold whenever it is switched on. Without forcing it enabled
+  # here, this check silently passes nothing and reads as a contract failure.
+  out=$(printf '{"session_id":"smoke-%s","cwd":"/r","hook_event_name":"Stop","prompt_id":"p%s","last_assistant_message":"Added slugify. All tests pass, the suite is green.","transcript_path":"/tmp/jev-smoke-transcript.jsonl"}' "$RANDOM" "$RANDOM" | JEV_FORCE_ENABLED=1 $JEV done)
   check "Stop block uses top-level decision=block" '"decision":"block"' "$out"
   check "Stop block carries the required reason" '"reason"' "$out"
   if [[ "$out" == *"hookSpecificOutput"* ]]; then

@@ -33,15 +33,104 @@ call**, Jev is a better fit:
 
 ## Install
 
-```sh
-npm install && npm run build
+### As a Claude Code plugin (recommended)
+
+```
+/plugin marketplace add Gilbert09/jev-cli
+/plugin install jev
 ```
 
-Then point Claude Code at the directory as a plugin, and set your key:
+Claude Code prompts for your TypeSafe API key on install and stores it as a
+secret. Get one at [console.typesafe.ai](https://console.typesafe.ai).
+
+Restart Claude Code, then confirm the hooks registered with `/hooks`.
+
+`dist/` is committed on purpose. Claude Code installs plugin dependencies with
+`npm ci --ignore-scripts` and never runs a build script, so a plugin whose hooks
+point at compiled output must ship that output — otherwise every hook is a
+silent no-op on the user's machine.
+
+### With OpenAI Codex
+
+Codex ships a deliberately Claude-Code-compatible hook engine — the Rust module
+is named `ClaudeHooksEngine` — so the same binary drives both:
 
 ```sh
-export TYPESAFE_API_KEY=...   # or add "apiKey" to ~/.jev/config.json
-node bin/jev.mjs doctor       # verifies config and live API access
+node bin/jev.mjs install --codex     # writes ~/.codex/hooks.json
+```
+
+Then **run `/hooks` in Codex and trust them**. Codex records trust against the
+hook definition's hash and **skips untrusted hooks silently**, so until you do
+this jev is installed but not running. Upgrading jev changes the hash and needs
+trusting again.
+
+**One behavioural difference you must know about.** Codex's output parser
+accepts `permissionDecision: "deny"`, and `"allow"` only when paired with
+`updatedInput`. A bare `"allow"` is rejected and **`"ask"` is rejected
+outright**. So the verdicts are spelled differently:
+
+| jev verdict | Claude Code | Codex |
+| --- | --- | --- |
+| deny | `deny` | `deny` |
+| ask | `ask` (prompts you) | `deny` — Codex has no way to prompt |
+| allow | `allow` | silence, deferring to Codex's own approval policy |
+
+`guard` fails **closed**, and `deny` is the only closed verdict Codex offers, so
+anything jev cannot judge safe is blocked rather than prompted. The reason text
+says it was uncertainty rather than a known hazard, so you can tell the two
+apart. If you would rather Codex's native approval flow handle uncertainty:
+
+```sh
+export JEV_CODEX_ASK=pass
+```
+
+Emitting Claude-shaped output at Codex would log a failed hook on every allow
+and every ask, leaving the guard silently inert — the exact failure mode that
+already shipped twice in this project, which is why the mapping is pinned by
+tests rather than assumed.
+
+What else differs on Codex:
+
+| | |
+| --- | --- |
+| **Edits** | Codex's edit tool is `apply_patch`, and its `tool_input` is `{"command": "<patch text>"}` rather than a `{file_path, old_string, new_string}` triple. `guard` judges the patch body and the paths in its header. |
+| **Reads** | Codex has no `Read` or `WebFetch` tool — it reads files through the shell. That is *better* coverage for `screen`: `cat`, `rg`, and `curl` output all arrive as one `Bash` PostToolUse. |
+| **Hosted web search** | Does not fire hooks at all. `screen` cannot see it. Upstream change required. |
+| **`screen` quarantine mode** | Not possible. Codex has no supported way to replace shell output, so quarantine degrades to `block`. |
+| **`rank`** | Connects, but is *less* likely to be called than on Claude Code: with tool search on, MCP tools are deferred and hidden from the model until a search surfaces them. It already ships disabled. |
+
+### From a clone
+
+```sh
+git clone https://github.com/Gilbert09/jev-cli && cd jev-cli
+npm install && npm run build
+export TYPESAFE_API_KEY=...        # or add "apiKey" to ~/.jev/config.json
+node bin/jev.mjs install           # writes the hooks, then proves they fire
+```
+
+`jev install` merges into `~/.claude/settings.json`, leaving any hooks you
+already have untouched, and is safe to re-run. Use `--project` to install into
+the current repo instead, or `--dry-run` to see the result without writing.
+
+It finishes by feeding the real binary a real `rm -rf /` payload and requiring a
+real `deny` back:
+
+```
+  verifying hooks actually fire...
+  guard            deny on `rm -rf /`  — hooks are live
+```
+
+That check exists because config being written is not evidence that anything
+works. Two capabilities in this project once shipped **100% inert** — `done`
+emitted a decision value the Stop contract does not accept, and `screen` read a
+payload field Claude Code does not send — while 462 unit tests and 157 live
+fixture cases passed, because every test built its payload the same wrong way.
+Only an end-to-end round trip catches that class of bug.
+
+### Verifying later
+
+```sh
+node bin/jev.mjs doctor      # config and live API access
 ```
 
 ## Configuration
@@ -52,20 +141,24 @@ optional.
 ```jsonc
 {
   "model": "jev-latest",
+  // Defaults follow the benchmark: guard and screen on, done and rank off.
+  // See bench/RESULTS.md — done (+3pts, p=0.593) and rank (+1pt, p=0.865) cost
+  // 6-8% for an effect indistinguishable from zero. Flip either to true if you
+  // want them.
   "guard":  { "enabled": true, "timeoutMs": 1500 },
   "screen": { "enabled": true, "timeoutMs": 2000, "maxBytes": 40000,
               // warn | block | quarantine — quarantine replaces the tool output
               // so injected instructions never reach the model as instructions
               "mode": "warn",
               "excludeGlobs": ["**/.env*", "**/*.pem", "**/*.key"] },
-  "done":   { "enabled": true, "timeoutMs": 2500,
+  "done":   { "enabled": false, "timeoutMs": 2500,
               // Block a Stop when the message claims a change reached every
               // place it belongs but nothing searched the tree after the last
               // edit. Off by default: it catches real incomplete sweeps, but on
               // work the model gets right it fires often and costs a turn each
               // time. Worth it for large mechanical refactors.
               "verifySweepClaims": false },
-  "rank":   { "enabled": true, "timeoutMs": 4000, "maxCandidates": 400 },
+  "rank":   { "enabled": false, "timeoutMs": 4000, "maxCandidates": 400 },
   "debug":  false
 }
 ```
@@ -154,13 +247,27 @@ allowlisted. A tool nobody invokes has no value however good it is.
 Full write-up, including two bugs the benchmark found in jev and two it found
 in the benchmark harness itself: [`bench/FINDINGS.md`](bench/FINDINGS.md).
 
-The follow-up investigation into whether the sonnet cost could be removed is in
-[`bench/SONNET-INVESTIGATION.md`](bench/SONNET-INVESTIGATION.md). Short version:
-the 8-point regression was noise (one task flipped direction on re-sampling),
-sonnet is at ceiling on every task that could be constructed for it, and the
-useful outcome was three real bugs found on the way — a `done` false block, and
-two `guard` questions that prompted on doubt they could never act on. Asks in an
-ordinary coding session went 5 → 0 with all 14 deny cases intact.
+**[`bench/RESULTS.md`](bench/RESULTS.md) — 1,176 sessions, 40 tasks.** The two
+safety capabilities work and the two quality capabilities do not:
+
+| on haiku | baseline | jev | delta | p |
+| --- | --- | --- | --- | --- |
+| `guard` | 44% | 73% | **+29** | <0.001 |
+| `screen` | 66% | 98% | **+33** | <0.001 |
+| `done` | 66% | 69% | +3 | 0.593 |
+| `rank` | 82% | 83% | +1 | 0.865 |
+
+`screen` is both better **and cheaper** — 26% less spend and 3.3 fewer turns per
+session, because an agent that ignores an injected instruction does not follow it
+down a rabbit hole. `guard` costs 9% for its 29 points. `done` and `rank` cost
+6–8% for nothing measurable, so they ship disabled.
+
+On sonnet jev changes nothing (93% → 90%, p=0.388) because sonnet has no
+headroom left to take. The follow-up investigation into that is in
+[`bench/SONNET-INVESTIGATION.md`](bench/SONNET-INVESTIGATION.md); it found the
+original 8-point "regression" was noise, and produced three real fixes on the
+way — asks in an ordinary coding session went 5 → 0 with all 14 deny cases
+intact.
 
 These numbers come from a tuning round, then an adversarial review that
 deliberately attacked the question sets, then the benchmark. Each round found

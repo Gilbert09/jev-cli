@@ -1,4 +1,8 @@
 import { formatReport, runSuite, type FixtureSuite } from "./harness.js";
+// Suites test question wording, not the shipped on/off default. Set before the
+// first loadConfig() call, which caches.
+process.env.JEV_FORCE_ENABLED = "1";
+
 import { loadConfig } from "../core/config.js";
 
 import { suite as guardSuite } from "../capabilities/guard/suite.js";

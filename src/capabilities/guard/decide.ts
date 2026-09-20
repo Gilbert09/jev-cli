@@ -29,7 +29,10 @@ import { BASH_KEYS, FILE_KEYS, THRESHOLDS } from "./questions.js";
  * cannot judge defers to the human.
  */
 
-export type GuardTool = "Bash" | "Write" | "Edit";
+// `apply_patch` is Codex's file-edit tool. It is judged with the command
+// question set, because what arrives is a patch body rather than a path plus a
+// replacement pair.
+export type GuardTool = "Bash" | "Write" | "Edit" | "apply_patch";
 
 export interface GuardContext {
   tool: GuardTool;

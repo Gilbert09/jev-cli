@@ -64,6 +64,7 @@ function usage(): string {
     "",
     "Other:",
     "  jev mcp       run the MCP server exposing the `rank` tool",
+    "  jev install   register the hooks with Claude Code, then prove they fire",
     "  jev doctor    check configuration and API connectivity",
     "",
   ].join("\n");
@@ -80,6 +81,12 @@ async function main(): Promise<void> {
   if (name === "mcp") {
     const { serve } = await import("./capabilities/rank/server.js");
     await serve();
+    return;
+  }
+
+  if (name === "install") {
+    const { install } = await import("./install.js");
+    process.exitCode = await install(process.argv.slice(3));
     return;
   }
 

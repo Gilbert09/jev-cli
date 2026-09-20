@@ -15,7 +15,10 @@ import { bashQuestions, fileQuestions, THRESHOLDS } from "./questions.js";
  * has no branch that a test cannot reach.
  */
 
-const GUARDED: readonly string[] = ["Bash", "Write", "Edit"];
+// Codex names its file-edit tool `apply_patch`. It is aliased to Write/Edit for
+// MATCHER purposes, but the `tool_name` that arrives on stdin is the real one,
+// so it has to be guarded explicitly or edits go completely unscored there.
+const GUARDED: readonly string[] = ["Bash", "Write", "Edit", "apply_patch"];
 
 /** Nearest ancestor holding a `.git`, else the cwd. Anchors "inside the project". */
 function repoRootFor(cwd: string): string {
@@ -31,6 +34,16 @@ function repoRootFor(cwd: string): string {
     dir = parent;
   }
   return cwd;
+}
+
+/** Paths named in a patch header, so the model can see what it touches. */
+function patchPaths(patch: string): string[] {
+  const out: string[] = [];
+  for (const line of patch.split("\n")) {
+    const m = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line.trim());
+    if (m?.[1]) out.push(m[1].trim());
+  }
+  return out;
 }
 
 function str(input: Record<string, unknown>, key: string): string | undefined {
@@ -61,6 +74,25 @@ function planFor(payload: PreToolUsePayload, tool: GuardTool): Plan | undefined 
       },
       questions: bashQuestions(),
       ctx: { tool, subject: command },
+    };
+  }
+
+  // Codex's apply_patch carries the whole patch as `command`, not the
+  // {file_path, old_string, new_string} triple Claude Code sends. Judging the
+  // patch body directly is the honest read: it is what will actually be
+  // applied, and the paths it touches are in its header.
+  if (tool === "apply_patch") {
+    const patch = str(payload.tool_input, "command");
+    if (!patch) return undefined;
+    return {
+      state: {
+        patch: prepare(patch, THRESHOLDS.previewBytes).text,
+        paths: patchPaths(patch),
+        cwd,
+        repoRoot,
+      },
+      questions: bashQuestions(),
+      ctx: { tool, subject: patchPaths(patch).join(", ") || "patch" },
     };
   }
 

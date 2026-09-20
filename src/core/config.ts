@@ -59,6 +59,25 @@ export interface Config {
   debug: boolean;
 }
 
+/**
+ * Defaults follow the measurement, not the build order.
+ *
+ * Across 1,176 benchmark sessions on haiku:
+ *
+ *   guard    +29 pts   cost  +9%    <- on
+ *   screen   +33 pts   cost -26%    <- on (it is cheaper AND better: an agent
+ *                                        that ignores an injection does not
+ *                                        follow it down a rabbit hole, saving
+ *                                        3.3 turns per session)
+ *   done      +3 pts   cost  +8%    <- off, p=0.593
+ *   rank      +1 pt    cost  +6%    <- off, p=0.865, and never called unless
+ *                                        driven directly: 0 adoptions in 18
+ *                                        sessions where it was connected
+ *
+ * `done` and `rank` ship off because charging users 6-8% for an effect
+ * indistinguishable from zero is not a default anyone would choose knowing the
+ * numbers. Both are one config line away for anyone who wants them.
+ */
 const DEFAULTS: Omit<Config, "apiKey"> = {
   model: "jev-latest",
   // Latency budget: these run on every tool call. A slow judge is a broken
@@ -72,8 +91,8 @@ const DEFAULTS: Omit<Config, "apiKey"> = {
     excludeGlobs: ["**/.env*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/.git/**"],
     maxBytes: 40_000,
   },
-  done: { enabled: true, timeoutMs: 2500, verifySweepClaims: false },
-  rank: { enabled: true, timeoutMs: 4000, maxCandidates: 400 },
+  done: { enabled: false, timeoutMs: 2500, verifySweepClaims: false },
+  rank: { enabled: false, timeoutMs: 4000, maxCandidates: 400 },
   debug: false,
 };
 
@@ -97,22 +116,38 @@ export function loadConfig(): Config {
   if (cached) return cached;
   const file = readConfigFile();
 
+  // The fixture suites measure whether the QUESTIONS are worded well, which is
+  // independent of whether a capability ships switched on. Without this, turning
+  // `done` and `rank` off by default would silently stop testing them — the
+  // suite would report 0/21 and read as a catastrophic regression rather than
+  // "this capability is disabled".
+  const forceEnabled = process.env.JEV_FORCE_ENABLED === "1";
+
   cached = {
-    apiKey: process.env.TYPESAFE_API_KEY ?? (file as { apiKey?: string }).apiKey,
+    // When installed as a Claude Code plugin, the key declared in
+    // plugin.json's `userConfig` arrives as CLAUDE_PLUGIN_OPTION_<KEY>. Checked
+    // first so a plugin install works with no environment setup at all, then
+    // the plain env var, then the config file.
+    apiKey:
+      process.env.CLAUDE_PLUGIN_OPTION_TYPESAFE_API_KEY ??
+      process.env.TYPESAFE_API_KEY ??
+      (file as { apiKey?: string }).apiKey,
     model: process.env.JEV_MODEL ?? file.model ?? DEFAULTS.model,
-    guard: mergeCapability(DEFAULTS.guard, file.guard),
+    guard: { ...mergeCapability(DEFAULTS.guard, file.guard), enabled: forceEnabled || mergeCapability(DEFAULTS.guard, file.guard).enabled },
     screen: {
       ...mergeCapability(DEFAULTS.screen, file.screen),
+      enabled: forceEnabled || mergeCapability(DEFAULTS.screen, file.screen).enabled,
       mode: (process.env.JEV_SCREEN_MODE as Config["screen"]["mode"]) ?? file.screen?.mode ?? DEFAULTS.screen.mode,
     },
     done: {
       ...mergeCapability(DEFAULTS.done, file.done),
+      enabled: forceEnabled || mergeCapability(DEFAULTS.done, file.done).enabled,
       verifySweepClaims:
         process.env.JEV_VERIFY_SWEEPS === "1" ||
         file.done?.verifySweepClaims === true ||
         DEFAULTS.done.verifySweepClaims,
     },
-    rank: mergeCapability(DEFAULTS.rank, file.rank),
+    rank: { ...mergeCapability(DEFAULTS.rank, file.rank), enabled: forceEnabled || mergeCapability(DEFAULTS.rank, file.rank).enabled },
     debug: process.env.JEV_DEBUG === "1" || file.debug === true,
   };
   return cached;

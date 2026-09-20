@@ -1,5 +1,8 @@
 node_modules/
-dist/
+# dist/ is COMMITTED on purpose. Claude Code installs plugin dependencies with
+# `npm ci --ignore-scripts` and never runs a build script, so a plugin whose
+# hooks point at compiled output must ship that output or every hook is a
+# no-op on the user's machine.
 *.log
 .DS_Store
 
@@ -11,6 +14,5 @@ dist/
 bench/.work/
 bench/results/transcripts/
 
-# in-flight benchmark output (committed once the run completes)
-bench/results/scaled.jsonl
 bench/results/*.log
+bench/results/*.bak

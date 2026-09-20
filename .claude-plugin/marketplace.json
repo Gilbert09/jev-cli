@@ -1,0 +1,17 @@
+{
+  "name": "jev",
+  "owner": {
+    "name": "Tom Owers",
+    "url": "https://github.com/Gilbert09"
+  },
+  "plugins": [
+    {
+      "name": "jev",
+      "source": ".",
+      "description": "Semantic permission gating and prompt-injection screening for Claude Code, powered by TypeSafe's Jev model. Measured +29 and +33 points on haiku across 1,176 benchmark sessions.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["security", "guardrails", "permissions", "prompt-injection"]
+    }
+  ]
+}

@@ -42,6 +42,33 @@ const resultsFile = join(RESULTS, process.env.BENCH_OUT ?? "runs.jsonl");
 mkdirSync(RESULTS, { recursive: true });
 
 // Nested Claude Code sessions inherit env that confuses the child. Strip it.
+/**
+ * Resolve the `claude` binary once, up front, and refuse to start without it.
+ *
+ * This is not defensive padding. `spawn("claude")` with the binary absent emits
+ * an 'error' event rather than throwing; the old handler resolved it as an
+ * empty session, the scorer then graded an untouched fixture, and the row went
+ * into the dataset looking exactly like a real measurement. 1,871 of 3,040 rows
+ * were fabricated that way — every one after a restart into a shell whose PATH
+ * lacked ~/.local/bin. Silence was the whole problem, so this is loud.
+ */
+const CLAUDE_BIN = (() => {
+  const explicit = process.env.BENCH_CLAUDE_BIN;
+  if (explicit) {
+    if (!existsSync(explicit)) throw new Error(`BENCH_CLAUDE_BIN set to ${explicit}, which does not exist`);
+    return explicit;
+  }
+  const found = spawnSync("bash", ["-lc", "command -v claude"], { encoding: "utf8" }).stdout?.trim();
+  if (found && existsSync(found)) return found;
+  for (const p of [`${process.env.HOME}/.local/bin/claude`, "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error(
+    "cannot find the `claude` binary. Set BENCH_CLAUDE_BIN to its path.\n" +
+    "Refusing to run: a missing binary yields empty sessions that score as real results.",
+  );
+})();
+
 const CHILD_ENV = { ...process.env };
 for (const k of [
   "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
@@ -186,7 +213,9 @@ async function runOne(task, arm, model, rep) {
   let resetsAtSeen = 0;
 
   for (let attempt = 0; attempt <= cfg.maxRetries; attempt++) {
-    ({ stdout, stderr, timedOut } = await spawnSession(args, dir));
+    let spawnFailed = false;
+    ({ stdout, stderr, timedOut, spawnFailed } = await spawnSession(args, dir));
+    if (spawnFailed) throw new Error(`cannot launch ${CLAUDE_BIN}: ${stderr}`);
     // A rejected rate limit is a property of the moment, not of the run. Wait it
     // out rather than recording a failure that says nothing about jev.
     if (!/"status":"rejected"/.test(stdout)) break;
@@ -225,14 +254,17 @@ async function runOne(task, arm, model, rep) {
 /** One session, as a promise. Kills the process if it outruns the timeout. */
 function spawnSession(args, cwd) {
   return new Promise((resolve) => {
-    const child = spawn("claude", args, { cwd, env: CHILD_ENV, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(CLAUDE_BIN, args, { cwd, env: CHILD_ENV, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", timedOut = false;
   let resetsAtSeen = 0;
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, cfg.timeoutSec * 1000);
     child.stdout.on("data", (d) => { stdout += d; });
     child.stderr.on("data", (d) => { stderr += d; });
     child.on("close", () => { clearTimeout(timer); resolve({ stdout, stderr, timedOut }); });
-    child.on("error", (err) => { clearTimeout(timer); resolve({ stdout, stderr: String(err), timedOut }); });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr: String(err), timedOut, spawnFailed: true });
+    });
   });
 }
 
@@ -324,6 +356,30 @@ async function worker(queue) {
       scored = await scoreRun(task, run);
     } catch (err) {
       console.error(`  ! ${task.id}/${arm}/${model}/r${rep}: ${err.message}`);
+      continue;
+    }
+
+    // A session the API never actually ran is not a data point. When the quota
+    // window is spent, `claude -p` returns with no result block — and scoring
+    // the untouched fixture produces a verdict that looks exactly like a real
+    // one. Recording it silently poisons the dataset, so drop it.
+    //
+    // This happened: 1,871 of 3,040 rows were scored from sessions that never
+    // executed, every one of them after a supervisor restart into a closed
+    // window. They were balanced across arms so the conclusions survived, but
+    // that was luck, not design.
+    if (!run.result || typeof run.result.total_cost_usd !== "number" || (run.result.num_turns ?? 0) === 0) {
+      console.error(`  ~ ${task.id}/${arm}/${model}/r${rep}: session produced no result — not recorded`);
+      rmSync(run.dir, { recursive: true, force: true });
+      consecutiveLimits++;
+      // Carry the window reset time out of the empty session too, or the
+      // supervisor is left guessing and falls back to blind retries.
+      if (run.resetsAtSeen) resetsAt = Math.max(resetsAt, run.resetsAtSeen);
+      if (consecutiveLimits >= LIMIT_PATIENCE) {
+        stopping = true;
+        console.error(`\nQUOTA WINDOW SPENT after ${consecutiveLimits} empty sessions.`);
+        if (resetsAt) console.error(`RESETS_AT=${resetsAt}`);
+      }
       continue;
     }
 
